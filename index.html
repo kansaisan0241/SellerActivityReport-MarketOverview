@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>媒介報告用 市場レポート作成ツール</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet">
+  <link rel="preconnect" href="https://cdn.jsdelivr.net">
+  <link rel="preconnect" href="https://unpkg.com">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar no-print">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true">⌂</div>
+        <div>
+          <p class="brand-title">市場レポート</p>
+          <p class="brand-subtitle">周辺物件の動きと価格ポジション</p>
+        </div>
+      </div>
+
+      <section class="side-card">
+        <div class="side-heading">
+          <span>1</span>
+          <h2>物件種別</h2>
+        </div>
+        <label class="field sr-label">
+          <span>物件種別</span>
+          <select id="propertyType">
+            <option value="land">土地</option>
+            <option value="house">中古戸建</option>
+            <option value="mansion">マンション</option>
+          </select>
+        </label>
+        <div class="type-note">種別に応じて坪単価と分布図の軸を自動調整します。</div>
+      </section>
+
+      <section class="side-card">
+        <div class="side-heading">
+          <span>2</span>
+          <h2>データ貼り付け</h2>
+        </div>
+        <textarea id="pasteArea" spellcheck="false" placeholder="Excelや不動産サイトからコピーした物件データを貼り付けてください"></textarea>
+        <div class="button-row compact-row">
+          <button class="ghost-button" id="loadSampleButton" type="button">サンプル</button>
+          <button class="ghost-button" id="clearButton" type="button">クリア</button>
+        </div>
+      </section>
+
+      <section class="side-card">
+        <div class="side-heading">
+          <span>3</span>
+          <h2>表示項目</h2>
+        </div>
+        <fieldset class="check-grid">
+          <legend>表示ブロック</legend>
+          <label><input type="checkbox" data-block="table" checked> 比較表</label>
+          <label><input type="checkbox" data-block="map" checked> 地図</label>
+          <label><input type="checkbox" data-block="chart" checked> 分布図</label>
+        </fieldset>
+      </section>
+
+      <section class="side-card">
+        <div class="side-heading">
+          <span>4</span>
+          <h2>分布図選択</h2>
+        </div>
+        <label class="field sr-label compact">
+          <span>分布図タイプ</span>
+          <select id="chartMode"></select>
+        </label>
+      </section>
+
+      <section class="side-card defaults-card">
+        <div class="side-heading">
+          <span>5</span>
+          <h2>計算条件</h2>
+        </div>
+        <label class="field">
+          <span>建物坪単価（万円）</span>
+          <input id="defaultBuildingUnitPrice" type="number" value="66" min="0" step="1">
+        </label>
+        <label class="field">
+          <span>リフォーム費用（万円）</span>
+          <input id="defaultRenovationCost" type="number" value="0" min="0" step="10">
+        </label>
+        <label class="field">
+          <span>建物減価償却年数</span>
+          <input id="defaultDepreciationYears" type="number" value="25" min="1" step="1">
+        </label>
+      </section>
+
+      <section class="side-card adjustment-card">
+        <div class="side-heading">
+          <span>6</span>
+          <h2>物件別調整</h2>
+        </div>
+        <label class="field">
+          <span>調整する物件</span>
+          <select id="adjustmentProperty"></select>
+        </label>
+        <label class="field">
+          <span>建物坪単価（万円）</span>
+          <input id="adjustmentBuildingUnitPrice" type="number" min="0" step="1">
+        </label>
+        <label class="field">
+          <span>リフォーム費用（万円）</span>
+          <input id="adjustmentRenovationCost" type="number" min="0" step="10">
+        </label>
+        <label class="field">
+          <span>建物減価償却年数</span>
+          <input id="adjustmentDepreciationYears" type="number" min="1" step="1">
+        </label>
+      </section>
+
+      <button class="primary-button generate-button" id="parseButton" type="button">市場レポート生成</button>
+    </aside>
+
+    <main class="main-area">
+      <header class="topbar no-print">
+        <div>
+          <p class="eyebrow">Consulting Report Builder</p>
+          <h1>市場レポート</h1>
+          <p>周辺物件の動きと価格ポジション</p>
+        </div>
+        <div class="header-actions">
+          <button class="ghost-button tab-button" data-view="jsonView" type="button">JSON読込</button>
+          <button class="ghost-button tab-button" id="exportButton" data-view="jsonView" type="button">JSON出力</button>
+          <button class="ghost-button" id="printButton" type="button">印刷</button>
+        </div>
+      </header>
+
+      <section id="reportView" class="view active">
+        <article class="report-sheet">
+          <header class="report-title">
+            <div>
+              <p class="eyebrow">媒介報告資料</p>
+              <h2>市場レポート</h2>
+              <p>周辺物件の動きと価格ポジション</p>
+            </div>
+            <dl>
+              <div><dt>物件種別</dt><dd id="reportType">土地</dd></div>
+              <div><dt>作成日</dt><dd id="reportDate"></dd></div>
+              <div><dt>対象件数</dt><dd id="reportCount">0件</dd></div>
+            </dl>
+          </header>
+
+          <section class="report-block summary-block" data-report-block="trend">
+            <div class="metrics" id="metrics"></div>
+          </section>
+
+          <section class="analysis-grid">
+            <section class="report-block analysis-card" data-report-block="map">
+              <h3>地図</h3>
+              <div id="map"></div>
+            </section>
+
+            <section class="report-block analysis-card" data-report-block="chart">
+              <h3>価格ポジション分布図</h3>
+              <div class="chart-box">
+                <canvas id="scatterChart"></canvas>
+              </div>
+            </section>
+          </section>
+
+          <section class="report-block table-card" data-report-block="table">
+            <div class="section-heading inline">
+              <h3>比較表</h3>
+              <span class="count-pill" id="currentCount">0件</span>
+            </div>
+            <div class="table-wrap">
+              <table id="reportTable">
+                <thead></thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </section>
+
+        </article>
+      </section>
+
+      <section id="inputView" class="view">
+        <section class="panel">
+          <div class="section-heading inline">
+            <div>
+              <p class="eyebrow">Preview</p>
+              <h2>読み込みデータ</h2>
+            </div>
+            <button class="ghost-button tab-button" data-view="reportView" type="button">レポートへ戻る</button>
+          </div>
+          <div class="table-wrap">
+            <table id="previewTable">
+              <thead></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+
+      <section id="jsonView" class="view">
+        <div class="json-layout">
+          <section class="panel">
+            <div class="section-heading">
+              <p class="eyebrow">Import</p>
+              <h2>前回JSON読込</h2>
+              <p class="hint">前回作成したJSONを貼り付けると、新規・掲載終了候補・価格変更を自動判定します。</p>
+            </div>
+            <textarea id="importArea" spellcheck="false" placeholder="前回JSONを貼り付け"></textarea>
+            <div class="button-row">
+              <button class="primary-button" id="restoreButton" type="button">現在データとして復元</button>
+              <button class="primary-button" id="importButton" type="button">前回データとして読み込む</button>
+              <button class="ghost-button" id="resetPreviousButton" type="button">前回データを解除</button>
+            </div>
+            <div class="status-box" id="importStatus">前回データ未読込</div>
+          </section>
+
+          <section class="panel">
+            <div class="section-heading">
+              <p class="eyebrow">Export</p>
+              <h2>JSON出力</h2>
+              <p class="hint">現在の入力内容をJSONとして保存できます。次回読み込むと前回データとして比較できます。</p>
+            </div>
+            <textarea id="exportArea" spellcheck="false"></textarea>
+            <div class="button-row">
+              <button class="ghost-button" id="downloadButton" type="button">ファイル保存</button>
+              <button class="ghost-button tab-button" data-view="reportView" type="button">レポートへ戻る</button>
+            </div>
+          </section>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
