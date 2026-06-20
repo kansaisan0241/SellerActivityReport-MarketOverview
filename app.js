@@ -306,27 +306,32 @@ function parseLabeledTextBlock(block) {
   const address3 = getImmediateValue("所在地名３");
   const reinsAddress = [prefecture, address1, address2, address3].filter(Boolean).join("");
   const reinsPrice = getAfterLabel(["価格"], /^[0-9,\.]+万円$/);
+  const reinsContractPrice = getAfterLabel(["成約価格"], /^[0-9,\.]+万円$/);
   const reinsLandArea = getAfterLabel(["土地面積", "（私道を含まず）"], /^[0-9,\.]+(?:㎡|m2|平米|坪)$/);
   const reinsBuildingArea = getAfterLabel(["建物面積", "延床面積"], /^[0-9,\.]+(?:㎡|m2|平米|坪)$/);
   const reinsExclusiveArea = getAfterLabel(["専有面積"], /^[0-9,\.]+(?:㎡|m2|平米|坪)$/);
   const propertyType = getAfterLabel(["物件種目"], /.+/);
+  const reinsRegisteredDate = getAfterLabel(["登録年月日"], /.+/);
+  const reinsContractDate = getAfterLabel(["成約年月日"], /.+/);
+  const reinsBuiltDate = getAfterLabel(["築年月"], /^\d{4}年/);
+  const reinsStatus = reinsContractPrice || reinsContractDate ? "成約" : "販売中";
 
-  record["物件名"] = get([/(?:物件名|名称|建物名|マンション名)\s*[:：]?\s*([^\n]+)/]) || (propertyNumber ? `${propertyType || "REINS"} ${propertyNumber}` : propertyType);
+  record["物件名"] = get([/(?:物件名|名称|建物名|マンション名)\s*[:：]?\s*([^\n]+)/]) || (reinsAddress ? `${propertyType || "REINS"} ${reinsAddress}` : (propertyNumber ? `${propertyType || "REINS"} ${propertyNumber}` : propertyType));
   record["所在地"] = reinsAddress || get([/(?:所在地|住所|物件所在地)\s*[:：]?\s*([^\n]+)/]);
-  record["価格"] = reinsPrice || get([/(?:販売価格|価格|物件価格)\s*[:：]?\s*([0-9,\.]+)\s*(?:万円|円)?/]);
+  record["価格"] = reinsContractPrice || reinsPrice || get([/(?:販売価格|成約価格|価格|物件価格)\s*[:：]?\s*([0-9,\.]+)\s*(?:万円|円)?/]);
   record["土地面積"] = areaValue(reinsLandArea || get([/(?:土地面積|敷地面積)\s*[:：]?\s*([0-9,\.]+\s*(?:㎡|m2|平米|坪)?)/]));
   record["建物面積"] = areaValue(reinsBuildingArea || get([/(?:建物面積|延床面積)\s*[:：]?\s*([0-9,\.]+\s*(?:㎡|m2|平米|坪)?)/]));
   record["専有面積"] = areaValue(reinsExclusiveArea || get([/(?:専有面積|専有)\s*[:：]?\s*([0-9,\.]+\s*(?:㎡|m2|平米|坪)?)/]));
-  record["築年数"] = ageValue(get([/(?:築年数|築後年数)\s*[:：]?\s*([0-9,\.]+)\s*年?/, /築\s*([0-9,\.]+)\s*年/]));
-  record["登録日"] = get([/(?:登録日|掲載日|情報登録日|公開日)\s*[:：]?\s*([0-9\/\-.年月日]+)/]);
+  record["築年数"] = ageValue(get([/(?:築年数|築後年数)\s*[:：]?\s*([0-9,\.]+)\s*年?/, /築\s*([0-9,\.]+)\s*年/])) || ageFromBuiltDate(reinsBuiltDate);
+  record["登録日"] = reinsRegisteredDate || get([/(?:登録日|掲載日|情報登録日|公開日)\s*[:：]?\s*([0-9\/\-.年月日]+)/]);
   record["物件URL"] = get([/(https?:\/\/[^\s]+)/]);
-  record["取引状況"] = get([/(?:取引状況|状態|販売状況)\s*[:：]?\s*([^\n]+)/]) || "販売中";
+  record["取引状況"] = reinsStatus || get([/(?:取引状況|状態|販売状況)\s*[:：]?\s*([^\n]+)/]) || "販売中";
   record["前回価格"] = get([/(?:前回価格)\s*[:：]?\s*([0-9,\.]+)\s*(?:万円|円)?/]);
   record["今回価格"] = get([/(?:今回価格)\s*[:：]?\s*([0-9,\.]+)\s*(?:万円|円)?/]);
   record["建物減価償却年数"] = get([/(?:建物減価償却年数|減価償却年数)\s*[:：]?\s*([0-9,\.]+)/]);
   record["建物坪単価"] = get([/(?:建物坪単価)\s*[:：]?\s*([0-9,\.]+)/]);
   record["リフォーム費用"] = get([/(?:リフォーム費用)\s*[:：]?\s*([0-9,\.]+)/]);
-  record["備考"] = get([/(?:備考|コメント|メモ)\s*[:：]?\s*([^\n]+)/]);
+  record["備考"] = get([/(?:備考|コメント|メモ)\s*[:：]?\s*([^\n]+)/]) || (propertyNumber ? `物件番号: ${propertyNumber}` : "");
   record["自社媒介フラグ"] = /自社媒介|自社/.test(text) ? "1" : "";
   return record;
 }
@@ -344,6 +349,11 @@ function areaValue(value) {
 
 function ageValue(value) {
   return String(value ?? "").replace(/[^0-9.]/g, "");
+}
+
+function ageFromBuiltDate(value) {
+  const match = String(value ?? "").match(/(\d{4})年/);
+  return match ? String(Math.max(0, new Date().getFullYear() - Number(match[1]))) : "";
 }
 
 function splitRow(row) {
