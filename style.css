@@ -404,7 +404,7 @@ textarea {
 
 .metrics {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
 }
 
@@ -687,6 +687,13 @@ td {
   accent-color: var(--yellow);
 }
 
+.import-file {
+  width: 100%;
+  margin: 0 0 12px;
+  color: var(--subtext);
+  font-size: 12px;
+}
+
 tbody tr {
   transition: background 0.2s ease;
 }
@@ -856,19 +863,58 @@ tr.status-ended td {
   }
 
   .table-wrap {
-    overflow-x: auto;
-    overflow-y: hidden;
+    overflow: visible;
+    border: 0;
+    background: transparent;
   }
 
-  table {
-    min-width: 920px;
-    table-layout: auto;
+  table,
+  table tbody {
+    display: block;
+    min-width: 0;
   }
 
-  th,
-  td {
-    white-space: nowrap;
-    word-break: normal;
+  table thead {
+    display: none;
+  }
+
+  table tbody {
+    display: grid;
+    gap: 10px;
+  }
+
+  table tr {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0 12px;
+    padding: 12px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: #fff;
+  }
+
+  table td {
+    display: grid;
+    grid-template-columns: minmax(62px, 0.8fr) minmax(0, 1.4fr);
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    padding: 6px 0;
+    border: 0;
+    white-space: normal;
+    word-break: break-word;
+  }
+
+  table td::before {
+    content: attr(data-label);
+    color: var(--subtext);
+    font-size: 10px;
+    font-weight: 700;
+  }
+
+  .table-input,
+  .table-select {
+    min-width: 0;
   }
 }
 
@@ -931,7 +977,7 @@ tr.status-ended td {
   }
 
   .metrics {
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(3, 1fr);
     gap: 8px;
   }
 

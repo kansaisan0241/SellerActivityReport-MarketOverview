@@ -17,7 +17,8 @@ const HEADERS = [
   "建物坪単価",
   "リフォーム費用",
   "備考",
-  "自社媒介フラグ"
+  "自社媒介フラグ",
+  "沿線駅"
 ];
 
 const TYPE_LABELS = {
@@ -103,13 +104,35 @@ function bindEvents() {
     processData();
     showView("reportView");
   });
+  $("#addTargetButton")?.addEventListener("click", () => {
+    state.addedRecords.push({
+      __recordId: `target-${Date.now()}`,
+      "物件名": "",
+      "所在地": "",
+      "沿線駅": "",
+      "価格": "",
+      "土地面積": "",
+      "建物面積": "",
+      "専有面積": "",
+      "築年数": "",
+      "登録日": new Date().toLocaleDateString("ja-JP"),
+      "取引状況": "対象物件"
+    });
+    processData();
+    showView("reportView");
+  });
   $("#printButton").addEventListener("click", () => {
     processData();
     showView("reportView");
     setTimeout(() => window.print(), 150);
   });
-  $("#exportButton").addEventListener("click", exportJson);
+  $("#exportButton").addEventListener("click", downloadJson);
   $("#downloadButton").addEventListener("click", downloadJson);
+  $("#importTopButton")?.addEventListener("click", () => $("#importFile")?.click());
+  $("#importFile")?.addEventListener("change", async (event) => {
+    const file = event.target.files?.[0];
+    if (file) $("#importArea").value = await file.text();
+  });
   $("#importButton").addEventListener("click", importPreviousJson);
   $("#restoreButton")?.addEventListener("click", restoreCurrentJson);
   $("#resetPreviousButton").addEventListener("click", () => {
@@ -176,7 +199,9 @@ function processData() {
     .map(applyRecordAdjustment)
     .map(applyTableEdits)
     .map(applyRecordPosition);
-  state.compared = compareRecords(state.current, state.previous).map(applyTableEdits);
+  state.compared = compareRecords(state.current, state.previous)
+    .map(applyTableEdits)
+    .sort((a, b) => Number(normalizeStatus(b.status) === "対象物件") - Number(normalizeStatus(a.status) === "対象物件"));
   state.compared.forEach((record, index) => {
     record.no = index + 1;
     const key = getRecordKey(record);
@@ -368,6 +393,8 @@ function parseLabeledTextBlock(block) {
   const reinsContractDate = getAfterLabel(["成約年月日"], /.+/);
   const reinsBuiltDate = getAfterLabel(["築年月"], /^\d{4}年/);
   const reinsStatus = reinsContractPrice || reinsContractDate ? "成約" : "販売中";
+  const reinsLine = getAfterLabel(["沿線名"], /.+/);
+  const reinsStation = getAfterLabel(["駅名"], /.+/);
 
   record["物件名"] = get([/(?:物件名|名称|建物名|マンション名)\s*[:：]?\s*([^\n]+)/]) || (reinsAddress ? `${propertyType || "REINS"} ${reinsAddress}` : (propertyNumber ? `${propertyType || "REINS"} ${propertyNumber}` : propertyType));
   record["所在地"] = reinsAddress || get([/(?:所在地|住所|物件所在地)\s*[:：]?\s*([^\n]+)/]);
@@ -379,6 +406,7 @@ function parseLabeledTextBlock(block) {
   record["登録日"] = reinsRegisteredDate || get([/(?:登録日|掲載日|情報登録日|公開日)\s*[:：]?\s*([0-9\/\-.年月日]+)/]);
   record["物件URL"] = get([/(https?:\/\/[^\s]+)/]);
   record["取引状況"] = reinsStatus || get([/(?:取引状況|状態|販売状況)\s*[:：]?\s*([^\n]+)/]) || "販売中";
+  record["沿線駅"] = [reinsLine, reinsStation].filter(Boolean).join(" ");
   record["前回価格"] = get([/(?:前回価格)\s*[:：]?\s*([0-9,\.]+)\s*(?:万円|円)?/]);
   record["今回価格"] = get([/(?:今回価格)\s*[:：]?\s*([0-9,\.]+)\s*(?:万円|円)?/]);
   record["建物減価償却年数"] = get([/(?:建物減価償却年数|減価償却年数)\s*[:：]?\s*([0-9,\.]+)/]);
@@ -443,6 +471,7 @@ function normalizeRecord(raw) {
     recordId: raw.__recordId || "",
     name: textValue(raw["物件名"]),
     address: textValue(raw["所在地"]),
+    station: textValue(raw["沿線駅"]),
     lat: numberValue(raw["緯度"]),
     lng: numberValue(raw["経度"]),
     price: numberValue(raw["今回価格"]) || numberValue(raw["価格"]),
@@ -485,7 +514,9 @@ function textValue(value) {
 }
 
 function normalizeStatus(value) {
-  return String(value ?? "").includes("成約") ? "成約物件" : "売出物件";
+  const status = String(value ?? "");
+  if (status.includes("対象")) return "対象物件";
+  return status.includes("成約") ? "成約物件" : "売出物件";
 }
 
 function isTruthy(value) {
@@ -563,23 +594,13 @@ function renderReport() {
 }
 
 function renderMetrics() {
-  const newCount = state.compared.filter((record) => record.comparisonStatus === "new").length;
-  const endedCount = state.compared.filter((record) => record.comparisonStatus === "ended").length;
+  const saleCount = state.compared.filter((record) => normalizeStatus(record.status) === "売出物件").length;
+  const contractCount = state.compared.filter((record) => normalizeStatus(record.status) === "成約物件").length;
   const shouldShowPriceChange = $("#showPriceChange")?.checked;
   const changedCount = shouldShowPriceChange ? state.compared.filter((record) => state.priceChangeFlags[getRecordKey(record)]).length : 0;
-  const competitors = state.compared.filter((record) => !record.ownBrokerage);
-  const competitorCount = competitors.length;
-  const competitorNewCount = competitors.filter((record) => record.comparisonStatus === "new").length;
-  const competitorEndedCount = competitors.filter((record) => record.comparisonStatus === "ended").length;
-  const competitorChangedCount = shouldShowPriceChange ? competitors.filter((record) => state.priceChangeFlags[getRecordKey(record)]).length : 0;
   $("#metrics").innerHTML = [
-    metricHtml("競合物件数", `${competitorCount}件`, [
-      `新規 ${competitorNewCount}件`,
-      `終了・成約 ${competitorEndedCount}件`,
-      `価格変更 ${competitorChangedCount}件`
-    ]),
-    metricHtml("新規物件数", `${newCount}件`),
-    metricHtml("終了・成約候補", `${endedCount}件`),
+    metricHtml("売出物件数", `${saleCount}件`),
+    metricHtml("成約物件数", `${contractCount}件`),
     metricHtml("価格変更数", `${changedCount}件`)
   ].join("");
 }
@@ -637,6 +658,7 @@ function renderTable(selector, records) {
     ["ステータス", "status"],
     ...(state.propertyType === "mansion" ? [["物件名", "name"]] : []),
     ["所在地", "address"],
+    ["沿線駅", "station"],
     ["価格", "price", "num"],
     ...(showPriceChange ? [["価格変更", "priceChange"]] : []),
     ["土地面積", "landArea", "num"],
@@ -651,19 +673,20 @@ function renderTable(selector, records) {
   table.querySelector("tbody").innerHTML = records.map((record) => {
     const recordKey = escapeHtml(getRecordKey(record));
     const rowClass = record.comparisonStatus === "new" ? "status-new" : state.priceChangeFlags[getRecordKey(record)] ? "status-changed" : record.comparisonStatus === "ended" ? "status-ended" : "";
-    return `<tr class="${rowClass}">${columns.map(([, key, cls]) => {
-      if (key === "priceChange") return `<td><input class="table-checkbox" type="checkbox" data-price-change="true" data-record-key="${recordKey}"${state.priceChangeFlags[getRecordKey(record)] ? " checked" : ""}></td>`;
+    return `<tr class="${rowClass}">${columns.map(([label, key, cls]) => {
+      if (key === "priceChange") return `<td data-label="${label}"><input class="table-checkbox" type="checkbox" data-price-change="true" data-record-key="${recordKey}"${state.priceChangeFlags[getRecordKey(record)] ? " checked" : ""}></td>`;
       if (key === "status") {
         const status = normalizeStatus(record.status);
-        return `<td><select class="table-select" data-edit-field="status" data-record-key="${recordKey}"><option value="売出物件"${status === "売出物件" ? " selected" : ""}>売出物件</option><option value="成約物件"${status === "成約物件" ? " selected" : ""}>成約物件</option></select></td>`;
+        if (isReportTable) return `<td data-label="${label}"><select class="table-select" data-edit-field="status" data-record-key="${recordKey}"><option value="対象物件"${status === "対象物件" ? " selected" : ""}>対象物件</option><option value="売出物件"${status === "売出物件" ? " selected" : ""}>売出物件</option><option value="成約物件"${status === "成約物件" ? " selected" : ""}>成約物件</option></select></td>`;
+        return `<td data-label="${label}">${escapeHtml(status)}</td>`;
       }
       const value = record[key];
-      if (isReportTable && ["name", "address", "price", "landArea", "buildingArea", "exclusiveArea", "age", "registeredDate"].includes(key)) {
+      if (isReportTable && ["name", "address", "station", "price", "landArea", "buildingArea", "exclusiveArea", "age", "registeredDate"].includes(key)) {
         const inputType = ["price", "landArea", "buildingArea", "exclusiveArea", "age"].includes(key) ? "number" : "text";
         const step = inputType === "number" ? " step=\"any\"" : "";
-        return `<td class="${cls || ""}"><input class="table-input" type="${inputType}"${step} data-edit-field="${key}" data-record-key="${recordKey}" value="${escapeHtml(value ?? "")}"></td>`;
+        return `<td class="${cls || ""}" data-label="${label}"><input class="table-input" type="${inputType}"${step} data-edit-field="${key}" data-record-key="${recordKey}" value="${escapeHtml(value ?? "")}"></td>`;
       }
-      return `<td class="${cls || ""}">${formatCell(key, value)}</td>`;
+      return `<td class="${cls || ""}" data-label="${label}">${formatCell(key, value)}</td>`;
     }).join("")}</tr>`;
   }).join("");
 }
@@ -845,7 +868,7 @@ function exportJson() {
 }
 
 function downloadJson() {
-  if (!$("#exportArea").value.trim()) exportJson();
+  exportJson();
   const blob = new Blob([$("#exportArea").value], { type: "application/json" });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
@@ -922,7 +945,8 @@ function recordsToPaste(records) {
     record.buildingUnitPrice,
     record.renovationCost,
     record.note,
-    record.ownBrokerage ? "1" : ""
+    record.ownBrokerage ? "1" : "",
+    record.station
   ]);
   return [HEADERS, ...rows].map((row) => row.map((value) => String(value ?? "").replace(/\t|\r?\n/g, " ")).join("\t")).join("\n");
 }
@@ -932,6 +956,7 @@ function recordFromJson(record) {
   const restored = {
     name: textValue(record.name),
     address: textValue(record.address),
+    station: textValue(record.station),
     lat: numberValue(record.lat),
     lng: numberValue(record.lng),
     price: numberValue(record.price || record.currentPrice),
@@ -964,7 +989,7 @@ function average(values) {
 function formatNumber(value) {
   const number = Number(value);
   if (!Number.isFinite(number) || number === 0) return "0";
-  return number.toLocaleString("ja-JP", { maximumFractionDigits: 1 });
+  return number.toLocaleString("ja-JP", { maximumFractionDigits: 2 });
 }
 
 function escapeHtml(value) {

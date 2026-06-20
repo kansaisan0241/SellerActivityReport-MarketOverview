@@ -47,6 +47,7 @@
         <textarea id="pasteArea" spellcheck="false" placeholder="Excelや不動産サイトからコピーした物件データを貼り付けてください"></textarea>
         <div class="button-row compact-row">
           <button class="primary-button" id="addCaseButton" type="button">事例追加</button>
+          <button class="ghost-button" id="addTargetButton" type="button">対象物件を追加</button>
           <button class="ghost-button" id="clearButton" type="button">クリア</button>
         </div>
       </section>
@@ -129,8 +130,8 @@
           <p>周辺物件の動きと価格ポジション</p>
         </div>
         <div class="header-actions">
-          <button class="ghost-button tab-button" data-view="jsonView" type="button">JSON読込</button>
-          <button class="ghost-button tab-button" id="exportButton" data-view="jsonView" type="button">JSON出力</button>
+          <button class="ghost-button tab-button" id="importTopButton" data-view="jsonView" type="button">インポート</button>
+          <button class="ghost-button tab-button" id="exportButton" data-view="jsonView" type="button">エクスポート</button>
           <button class="ghost-button" id="printButton" type="button">印刷</button>
         </div>
       </header>
@@ -210,9 +211,10 @@
           <section class="panel">
             <div class="section-heading">
               <p class="eyebrow">Import</p>
-              <h2>前回JSON読込</h2>
-              <p class="hint">前回作成したJSONを貼り付けると、新規・掲載終了候補・価格変更を自動判定します。</p>
+              <h2>インポート</h2>
+              <p class="hint">JSONファイルを選択して、前回比較または現在データの復元に利用します。</p>
             </div>
+            <input class="import-file" id="importFile" type="file" accept="application/json,.json">
             <textarea id="importArea" spellcheck="false" placeholder="前回JSONを貼り付け"></textarea>
             <div class="button-row">
               <button class="primary-button" id="restoreButton" type="button">現在データとして復元</button>
@@ -225,12 +227,12 @@
           <section class="panel">
             <div class="section-heading">
               <p class="eyebrow">Export</p>
-              <h2>JSON出力</h2>
+              <h2>エクスポート</h2>
               <p class="hint">現在の入力内容をJSONとして保存できます。次回読み込むと前回データとして比較できます。</p>
             </div>
             <textarea id="exportArea" spellcheck="false"></textarea>
             <div class="button-row">
-              <button class="ghost-button" id="downloadButton" type="button">ファイル保存</button>
+              <button class="ghost-button" id="downloadButton" type="button">エクスポート</button>
               <button class="ghost-button tab-button" data-view="reportView" type="button">レポートへ戻る</button>
             </div>
           </section>
