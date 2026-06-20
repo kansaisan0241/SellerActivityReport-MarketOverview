@@ -836,7 +836,10 @@ function exportJson() {
     exportedAt: new Date().toISOString(),
     propertyType: state.propertyType,
     defaults: getDefaults(),
-    records: state.current
+    records: state.current.map((record) => ({
+      ...record,
+      priceChanged: Boolean(state.priceChangeFlags[getRecordKey(record)])
+    }))
   };
   $("#exportArea").value = JSON.stringify(payload, null, 2);
 }
@@ -888,6 +891,10 @@ function restoreCurrentJson() {
     state.priceChangeFlags = {};
     $("#pasteArea").value = recordsToPaste(records.map(recordFromJson));
     processData();
+    state.current.forEach((record, index) => {
+      state.priceChangeFlags[getRecordKey(record)] = Boolean(records[index]?.priceChanged);
+    });
+    renderReport();
     $("#importStatus").textContent = `現在データ ${records.length}件を復元しました。`;
     showView("reportView");
   } catch (error) {
