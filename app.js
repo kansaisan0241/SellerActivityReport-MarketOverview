@@ -50,6 +50,7 @@ const CHART_OPTIONS = {
 const state = {
   propertyType: "land",
   current: [],
+  addedRecords: [],
   previous: [],
   compared: [],
   adjustments: {},
@@ -65,7 +66,6 @@ const $$ = (selector) => Array.from(document.querySelectorAll(selector));
 
 document.addEventListener("DOMContentLoaded", () => {
   bindEvents();
-  setDefaultPaste();
   refreshChartMode();
   processData();
 });
@@ -87,12 +87,16 @@ function bindEvents() {
   });
   $("#clearButton").addEventListener("click", () => {
     $("#pasteArea").value = "";
+    state.addedRecords = [];
     processData();
   });
-  $("#loadSampleButton").addEventListener("click", () => {
-    setDefaultPaste();
+  $("#addCaseButton")?.addEventListener("click", () => {
+    const incomingRecords = parsePastedData($("#pasteArea").value);
+    if (!incomingRecords.length) return;
+    state.addedRecords.push(...incomingRecords);
+    $("#pasteArea").value = "";
     processData();
-    showView("inputView");
+    showView("reportView");
   });
   $("#printButton").addEventListener("click", () => {
     processData();
@@ -154,7 +158,8 @@ function refreshChartMode() {
 
 function processData() {
   state.propertyType = $("#propertyType").value;
-  state.current = parsePastedData($("#pasteArea").value)
+  const pendingRecords = parsePastedData($("#pasteArea").value);
+  state.current = [...state.addedRecords, ...pendingRecords]
     .map(normalizeRecord)
     .map(applyRecordAdjustment)
     .map(applyRecordPosition);
@@ -267,6 +272,7 @@ function parseLabeledTextData(text) {
 function parseLabeledTextBlock(block) {
   const record = {};
   const text = block.replace(/\r/g, "\n");
+  const lines = text.split("\n").map((line) => cleanExtractedValue(line)).filter(Boolean);
   const get = (patterns) => {
     for (const pattern of patterns) {
       const match = text.match(pattern);
@@ -275,12 +281,42 @@ function parseLabeledTextBlock(block) {
     return "";
   };
 
-  record["物件名"] = get([/(?:物件名|名称|建物名|マンション名)\s*[:：]?\s*([^\n]+)/]);
-  record["所在地"] = get([/(?:所在地|住所|物件所在地)\s*[:：]?\s*([^\n]+)/]);
-  record["価格"] = get([/(?:販売価格|価格|物件価格)\s*[:：]?\s*([0-9,\.]+)\s*(?:万円|円)?/]);
-  record["土地面積"] = areaValue(get([/(?:土地面積|敷地面積)\s*[:：]?\s*([0-9,\.]+\s*(?:㎡|m2|平米|坪)?)/]));
-  record["建物面積"] = areaValue(get([/(?:建物面積|延床面積)\s*[:：]?\s*([0-9,\.]+\s*(?:㎡|m2|平米|坪)?)/]));
-  record["専有面積"] = areaValue(get([/(?:専有面積|専有)\s*[:：]?\s*([0-9,\.]+\s*(?:㎡|m2|平米|坪)?)/]));
+  const getAfterLabel = (labels, valuePattern = null) => {
+    for (let index = 0; index < lines.length; index += 1) {
+      if (!labels.some((label) => lines[index] === label)) continue;
+      for (let nextIndex = index + 1; nextIndex < Math.min(lines.length, index + 8); nextIndex += 1) {
+        const candidate = lines[nextIndex];
+        if (labels.some((label) => candidate === label)) continue;
+        if (!valuePattern || valuePattern.test(candidate)) return candidate;
+      }
+    }
+    return "";
+  };
+
+  const getImmediateValue = (label) => {
+    const index = lines.indexOf(label);
+    const candidate = index >= 0 ? lines[index + 1] || "" : "";
+    return /^(その他所在地表示|交通|交通１|交通２|交通３|沿線名|駅名)$/.test(candidate) ? "" : candidate;
+  };
+
+  const propertyNumber = getAfterLabel(["物件番号"], /^\d+$/);
+  const prefecture = getImmediateValue("都道府県名");
+  const address1 = getImmediateValue("所在地名１");
+  const address2 = getImmediateValue("所在地名２");
+  const address3 = getImmediateValue("所在地名３");
+  const reinsAddress = [prefecture, address1, address2, address3].filter(Boolean).join("");
+  const reinsPrice = getAfterLabel(["価格"], /^[0-9,\.]+万円$/);
+  const reinsLandArea = getAfterLabel(["土地面積", "（私道を含まず）"], /^[0-9,\.]+(?:㎡|m2|平米|坪)$/);
+  const reinsBuildingArea = getAfterLabel(["建物面積", "延床面積"], /^[0-9,\.]+(?:㎡|m2|平米|坪)$/);
+  const reinsExclusiveArea = getAfterLabel(["専有面積"], /^[0-9,\.]+(?:㎡|m2|平米|坪)$/);
+  const propertyType = getAfterLabel(["物件種目"], /.+/);
+
+  record["物件名"] = get([/(?:物件名|名称|建物名|マンション名)\s*[:：]?\s*([^\n]+)/]) || (propertyNumber ? `${propertyType || "REINS"} ${propertyNumber}` : propertyType);
+  record["所在地"] = reinsAddress || get([/(?:所在地|住所|物件所在地)\s*[:：]?\s*([^\n]+)/]);
+  record["価格"] = reinsPrice || get([/(?:販売価格|価格|物件価格)\s*[:：]?\s*([0-9,\.]+)\s*(?:万円|円)?/]);
+  record["土地面積"] = areaValue(reinsLandArea || get([/(?:土地面積|敷地面積)\s*[:：]?\s*([0-9,\.]+\s*(?:㎡|m2|平米|坪)?)/]));
+  record["建物面積"] = areaValue(reinsBuildingArea || get([/(?:建物面積|延床面積)\s*[:：]?\s*([0-9,\.]+\s*(?:㎡|m2|平米|坪)?)/]));
+  record["専有面積"] = areaValue(reinsExclusiveArea || get([/(?:専有面積|専有)\s*[:：]?\s*([0-9,\.]+\s*(?:㎡|m2|平米|坪)?)/]));
   record["築年数"] = ageValue(get([/(?:築年数|築後年数)\s*[:：]?\s*([0-9,\.]+)\s*年?/, /築\s*([0-9,\.]+)\s*年/]));
   record["登録日"] = get([/(?:登録日|掲載日|情報登録日|公開日)\s*[:：]?\s*([0-9\/\-.年月日]+)/]);
   record["物件URL"] = get([/(https?:\/\/[^\s]+)/]);
@@ -742,6 +778,7 @@ function restoreCurrentJson() {
     }
     state.adjustments = {};
     state.positionAdjustments = {};
+    state.addedRecords = [];
     $("#pasteArea").value = recordsToPaste(records.map(recordFromJson));
     processData();
     $("#importStatus").textContent = `現在データ ${records.length}件を復元しました。`;

@@ -42,7 +42,7 @@ HTML / CSS / JavaScriptだけで動く、媒介報告用の市場レポート作
 ## GitHub Pagesで無料公開する方法
 
 1. GitHubで新しいリポジトリを作成します。
-2. `index.html`, `style.css`, `app.js`, `sample.json`, `README.md` をリポジトリ直下にアップロードします。
+2. `index.html`, `style.css`, `app.js`, `README.md` をリポジトリ直下にアップロードします。
 3. リポジトリの `Settings` を開きます。
 4. `Pages` を選択します。
 5. `Build and deployment` の `Source` を `Deploy from a branch` にします。

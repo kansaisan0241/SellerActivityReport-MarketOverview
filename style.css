@@ -787,6 +787,22 @@ tr.status-ended td {
 }
 
 @media (max-width: 720px) {
+  .app-shell {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .main-area {
+    order: 1;
+  }
+
+  .sidebar {
+    order: 2;
+    min-height: 0;
+    border-top: 1px solid var(--border);
+    border-bottom: 0;
+  }
+
   .main-area,
   .sidebar {
     padding: 16px;
@@ -798,7 +814,7 @@ tr.status-ended td {
   }
 
   .metrics {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .report-sheet,
@@ -808,6 +824,22 @@ tr.status-ended td {
   .point-card,
   .comment-panel {
     padding: 18px;
+  }
+
+  .table-wrap {
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+
+  table {
+    min-width: 920px;
+    table-layout: auto;
+  }
+
+  th,
+  td {
+    white-space: nowrap;
+    word-break: normal;
   }
 }
 
