@@ -56,6 +56,8 @@ const state = {
   adjustments: {},
   positionAdjustments: {},
   geocodingKeys: new Set(),
+  tableEdits: {},
+  priceChangeFlags: {},
   selectedAdjustmentKey: "",
   map: null,
   markers: [],
@@ -89,6 +91,8 @@ function bindEvents() {
   $("#clearButton").addEventListener("click", () => {
     $("#pasteArea").value = "";
     state.addedRecords = [];
+    state.tableEdits = {};
+    state.priceChangeFlags = {};
     processData();
   });
   $("#addCaseButton")?.addEventListener("click", () => {
@@ -115,6 +119,9 @@ function bindEvents() {
     processData();
   });
   $("#chartMode").addEventListener("change", () => renderChart());
+  $("#showPriceChange")?.addEventListener("change", renderReport);
+  $("#geocodeButton")?.addEventListener("click", geocodeMissingRecords);
+  $("#reportTable")?.addEventListener("change", handleTableChange);
   $("#adjustmentProperty")?.addEventListener("change", () => {
     state.selectedAdjustmentKey = $("#adjustmentProperty").value;
     syncAdjustmentInputs();
@@ -160,13 +167,22 @@ function refreshChartMode() {
 function processData() {
   state.propertyType = $("#propertyType").value;
   const pendingRecords = parsePastedData($("#pasteArea").value);
-  state.current = [...state.addedRecords, ...pendingRecords]
+  const sourceRecords = [...state.addedRecords, ...pendingRecords].map((record, index) => ({
+    ...record,
+    __recordId: record.__recordId || createRecordId(record, index)
+  }));
+  state.current = sourceRecords
     .map(normalizeRecord)
     .map(applyRecordAdjustment)
+    .map(applyTableEdits)
     .map(applyRecordPosition);
-  state.compared = compareRecords(state.current, state.previous);
+  state.compared = compareRecords(state.current, state.previous).map(applyTableEdits);
   state.compared.forEach((record, index) => {
     record.no = index + 1;
+    const key = getRecordKey(record);
+    if (!(key in state.priceChangeFlags)) {
+      state.priceChangeFlags[key] = record.comparisonStatus === "changed";
+    }
   });
   renderAdjustmentControls();
   renderPreview();
@@ -176,7 +192,11 @@ function processData() {
 }
 
 function getRecordKey(record) {
-  return record.matchKeys[0] || `${record.address}|${record.name}`;
+  return record.recordId || record.matchKeys[0] || `${record.address}|${record.name}`;
+}
+
+function createRecordId(record, index) {
+  return [record["物件名"], record["所在地"], record["登録日"], record["価格"] || record["今回価格"], index].join("|");
 }
 
 function applyRecordAdjustment(record) {
@@ -196,6 +216,34 @@ function applyRecordAdjustment(record) {
 function applyRecordPosition(record) {
   const position = state.positionAdjustments[getRecordKey(record)];
   return position ? { ...record, lat: position.lat, lng: position.lng } : record;
+}
+
+function applyTableEdits(record) {
+  const edits = state.tableEdits[getRecordKey(record)];
+  if (!edits) return record;
+  const updated = { ...record, ...edits };
+  ["price", "landArea", "buildingArea", "exclusiveArea", "age"].forEach((field) => {
+    if (field in edits) updated[field] = numberValue(edits[field]);
+  });
+  updated.currentPrice = updated.price;
+  updated.matchKeys = createMatchKeys(updated);
+  updated.unitPrice = calculateUnitPrice(updated);
+  return updated;
+}
+
+function handleTableChange(event) {
+  const target = event.target;
+  const key = target.dataset.recordKey;
+  if (!key) return;
+  if (target.dataset.priceChange) {
+    state.priceChangeFlags[key] = target.checked;
+    renderMetrics();
+    return;
+  }
+  const field = target.dataset.editField;
+  if (!field) return;
+  state.tableEdits[key] = { ...(state.tableEdits[key] || {}), [field]: target.value };
+  processData();
 }
 
 function renderAdjustmentControls() {
@@ -392,6 +440,7 @@ function parseCsvLine(line) {
 function normalizeRecord(raw) {
   const defaults = getDefaults();
   const record = {
+    recordId: raw.__recordId || "",
     name: textValue(raw["物件名"]),
     address: textValue(raw["所在地"]),
     lat: numberValue(raw["緯度"]),
@@ -403,7 +452,7 @@ function normalizeRecord(raw) {
     age: numberValue(raw["築年数"]),
     registeredDate: textValue(raw["登録日"]),
     url: textValue(raw["物件URL"]),
-    status: textValue(raw["取引状況"]) || "販売中",
+    status: normalizeStatus(raw["取引状況"]),
     previousPrice: numberValue(raw["前回価格"]),
     currentPrice: numberValue(raw["今回価格"]) || numberValue(raw["価格"]),
     depreciationYears: numberValue(raw["建物減価償却年数"]) || defaults.depreciationYears,
@@ -433,6 +482,10 @@ function numberValue(value) {
 
 function textValue(value) {
   return String(value ?? "").trim();
+}
+
+function normalizeStatus(value) {
+  return String(value ?? "").includes("成約") ? "成約物件" : "売出物件";
 }
 
 function isTruthy(value) {
@@ -488,7 +541,7 @@ function compareRecords(current, previous) {
 
   previous.forEach((record) => {
     if (!matchedPrevious.has(record)) {
-      compared.push({ ...record, comparisonStatus: "ended" });
+      compared.push({ ...record, status: "成約物件", comparisonStatus: "ended" });
     }
   });
   return compared;
@@ -512,12 +565,13 @@ function renderReport() {
 function renderMetrics() {
   const newCount = state.compared.filter((record) => record.comparisonStatus === "new").length;
   const endedCount = state.compared.filter((record) => record.comparisonStatus === "ended").length;
-  const changedCount = state.compared.filter((record) => record.comparisonStatus === "changed").length;
+  const shouldShowPriceChange = $("#showPriceChange")?.checked;
+  const changedCount = shouldShowPriceChange ? state.compared.filter((record) => state.priceChangeFlags[getRecordKey(record)]).length : 0;
   const competitors = state.compared.filter((record) => !record.ownBrokerage);
   const competitorCount = competitors.length;
   const competitorNewCount = competitors.filter((record) => record.comparisonStatus === "new").length;
   const competitorEndedCount = competitors.filter((record) => record.comparisonStatus === "ended").length;
-  const competitorChangedCount = competitors.filter((record) => record.comparisonStatus === "changed").length;
+  const competitorChangedCount = shouldShowPriceChange ? competitors.filter((record) => state.priceChangeFlags[getRecordKey(record)]).length : 0;
   $("#metrics").innerHTML = [
     metricHtml("競合物件数", `${competitorCount}件`, [
       `新規 ${competitorNewCount}件`,
@@ -576,12 +630,15 @@ function renderMiniList(selector, records, type) {
 
 function renderTable(selector, records) {
   const table = $(selector);
+  const isReportTable = selector === "#reportTable";
+  const showPriceChange = isReportTable && $("#showPriceChange")?.checked;
   const columns = [
     ["No", "no", "num"],
-    ["ステータス", "comparisonStatus"],
+    ["ステータス", "status"],
     ...(state.propertyType === "mansion" ? [["物件名", "name"]] : []),
     ["所在地", "address"],
     ["価格", "price", "num"],
+    ...(showPriceChange ? [["価格変更", "priceChange"]] : []),
     ["土地面積", "landArea", "num"],
     ["建物面積", "buildingArea", "num"],
     ...(state.propertyType === "mansion" ? [["専有面積", "exclusiveArea", "num"]] : []),
@@ -592,18 +649,23 @@ function renderTable(selector, records) {
   ];
   table.querySelector("thead").innerHTML = `<tr>${columns.map(([label, , cls]) => `<th class="${cls || ""}">${label}</th>`).join("")}</tr>`;
   table.querySelector("tbody").innerHTML = records.map((record) => {
-    const rowClass = record.comparisonStatus === "new" ? "status-new" : record.comparisonStatus === "changed" ? "status-changed" : record.comparisonStatus === "ended" ? "status-ended" : "";
+    const recordKey = escapeHtml(getRecordKey(record));
+    const rowClass = record.comparisonStatus === "new" ? "status-new" : state.priceChangeFlags[getRecordKey(record)] ? "status-changed" : record.comparisonStatus === "ended" ? "status-ended" : "";
     return `<tr class="${rowClass}">${columns.map(([, key, cls]) => {
-      if (key === "comparisonStatus") return `<td>${statusBadge(record.comparisonStatus)}</td>`;
+      if (key === "priceChange") return `<td><input class="table-checkbox" type="checkbox" data-price-change="true" data-record-key="${recordKey}"${state.priceChangeFlags[getRecordKey(record)] ? " checked" : ""}></td>`;
+      if (key === "status") {
+        const status = normalizeStatus(record.status);
+        return `<td><select class="table-select" data-edit-field="status" data-record-key="${recordKey}"><option value="売出物件"${status === "売出物件" ? " selected" : ""}>売出物件</option><option value="成約物件"${status === "成約物件" ? " selected" : ""}>成約物件</option></select></td>`;
+      }
       const value = record[key];
+      if (isReportTable && ["name", "address", "price", "landArea", "buildingArea", "exclusiveArea", "age", "registeredDate"].includes(key)) {
+        const inputType = ["price", "landArea", "buildingArea", "exclusiveArea", "age"].includes(key) ? "number" : "text";
+        const step = inputType === "number" ? " step=\"any\"" : "";
+        return `<td class="${cls || ""}"><input class="table-input" type="${inputType}"${step} data-edit-field="${key}" data-record-key="${recordKey}" value="${escapeHtml(value ?? "")}"></td>`;
+      }
       return `<td class="${cls || ""}">${formatCell(key, value)}</td>`;
     }).join("")}</tr>`;
   }).join("");
-}
-
-function statusBadge(status) {
-  const labels = { new: "販売物件", changed: "価格変更", ended: "終了・成約候補", same: "販売物件" };
-  return `<span class="badge ${status}">${labels[status] || status}</span>`;
 }
 
 function formatCell(key, value) {
@@ -631,7 +693,7 @@ function renderMap() {
   state.markers.forEach((marker) => marker.remove());
   state.markers = [];
   points.forEach((record) => {
-    const color = record.ownBrokerage ? "#111111" : record.comparisonStatus === "changed" ? "#d6a700" : record.comparisonStatus === "ended" ? "#9ca3af" : statusColor(record.status);
+    const color = record.ownBrokerage ? "#111111" : state.priceChangeFlags[getRecordKey(record)] ? "#d6a700" : record.comparisonStatus === "ended" ? "#9ca3af" : statusColor(record.status);
     const marker = L.marker([record.lat, record.lng], {
       draggable: true,
       icon: L.divIcon({
@@ -822,6 +884,8 @@ function restoreCurrentJson() {
     state.adjustments = {};
     state.positionAdjustments = {};
     state.addedRecords = [];
+    state.tableEdits = {};
+    state.priceChangeFlags = {};
     $("#pasteArea").value = recordsToPaste(records.map(recordFromJson));
     processData();
     $("#importStatus").textContent = `現在データ ${records.length}件を復元しました。`;

@@ -663,6 +663,30 @@ td {
   font-weight: 500;
 }
 
+.table-input,
+.table-select {
+  width: 100%;
+  min-width: 0;
+  padding: 5px 6px;
+  color: var(--text);
+  background: #fff;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  font: inherit;
+}
+
+.table-input:focus,
+.table-select:focus {
+  border-color: var(--primary);
+  outline: none;
+}
+
+.table-checkbox {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--yellow);
+}
+
 tbody tr {
   transition: background 0.2s ease;
 }

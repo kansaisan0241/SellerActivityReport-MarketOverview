@@ -61,6 +61,7 @@
           <label><input type="checkbox" data-block="table" checked> 比較表</label>
           <label><input type="checkbox" data-block="map" checked> 地図</label>
           <label><input type="checkbox" data-block="chart" checked> 分布図</label>
+          <label><input type="checkbox" id="showPriceChange"> 価格変更</label>
         </fieldset>
       </section>
 
@@ -155,7 +156,10 @@
 
           <section class="analysis-grid">
             <section class="report-block analysis-card" data-report-block="map">
-              <h3>地図</h3>
+              <div class="section-heading inline">
+                <h3>地図</h3>
+                <button class="ghost-button no-print" id="geocodeButton" type="button">住所からピンを配置</button>
+              </div>
               <div id="map"></div>
             </section>
 
