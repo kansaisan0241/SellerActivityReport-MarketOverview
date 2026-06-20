@@ -55,6 +55,7 @@ const state = {
   compared: [],
   adjustments: {},
   positionAdjustments: {},
+  geocodingKeys: new Set(),
   selectedAdjustmentKey: "",
   map: null,
   markers: [],
@@ -164,10 +165,14 @@ function processData() {
     .map(applyRecordAdjustment)
     .map(applyRecordPosition);
   state.compared = compareRecords(state.current, state.previous);
+  state.compared.forEach((record, index) => {
+    record.no = index + 1;
+  });
   renderAdjustmentControls();
   renderPreview();
   renderReport();
   syncBlocks();
+  geocodeMissingRecords();
 }
 
 function getRecordKey(record) {
@@ -572,18 +577,18 @@ function renderMiniList(selector, records, type) {
 function renderTable(selector, records) {
   const table = $(selector);
   const columns = [
-    ["判定", "comparisonStatus"],
-    ["物件名", "name"],
+    ["No", "no", "num"],
+    ["ステータス", "comparisonStatus"],
+    ...(state.propertyType === "mansion" ? [["物件名", "name"]] : []),
     ["所在地", "address"],
     ["価格", "price", "num"],
     ["土地面積", "landArea", "num"],
     ["建物面積", "buildingArea", "num"],
-    ["専有面積", "exclusiveArea", "num"],
+    ...(state.propertyType === "mansion" ? [["専有面積", "exclusiveArea", "num"]] : []),
     ["築年数", "age", "num"],
     ["坪単価", "unitPrice", "num"],
     ["取引状況", "status"],
-    ["登録日", "registeredDate"],
-    ["備考", "note"]
+    ["登録日", "registeredDate"]
   ];
   table.querySelector("thead").innerHTML = `<tr>${columns.map(([label, , cls]) => `<th class="${cls || ""}">${label}</th>`).join("")}</tr>`;
   table.querySelector("tbody").innerHTML = records.map((record) => {
@@ -597,7 +602,7 @@ function renderTable(selector, records) {
 }
 
 function statusBadge(status) {
-  const labels = { new: "新規", changed: "価格変更", ended: "掲載終了候補", same: "継続" };
+  const labels = { new: "販売物件", changed: "価格変更", ended: "終了・成約候補", same: "販売物件" };
   return `<span class="badge ${status}">${labels[status] || status}</span>`;
 }
 
@@ -615,7 +620,7 @@ function renderMap() {
     mapElement.innerHTML = '<div class="empty-visual">Leafletを読み込めませんでした。インターネット接続またはCDNの読み込み設定を確認してください。</div>';
     return;
   }
-  const points = state.compared.filter((record) => record.lat && record.lng && record.comparisonStatus !== "ended");
+  const points = state.compared.filter((record) => record.lat && record.lng);
   if (!state.map) {
     state.map = L.map("map", { scrollWheelZoom: false }).setView([35.681236, 139.767125], 12);
     L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
@@ -626,17 +631,17 @@ function renderMap() {
   state.markers.forEach((marker) => marker.remove());
   state.markers = [];
   points.forEach((record) => {
-    const color = record.ownBrokerage ? "#111111" : record.comparisonStatus === "changed" ? "#d6a700" : statusColor(record.status);
+    const color = record.ownBrokerage ? "#111111" : record.comparisonStatus === "changed" ? "#d6a700" : record.comparisonStatus === "ended" ? "#9ca3af" : statusColor(record.status);
     const marker = L.marker([record.lat, record.lng], {
       draggable: true,
       icon: L.divIcon({
         className: "market-marker-shell",
-        iconSize: [record.ownBrokerage ? 22 : 16, record.ownBrokerage ? 22 : 16],
-        iconAnchor: [record.ownBrokerage ? 11 : 8, record.ownBrokerage ? 11 : 8],
-        html: `<span class="market-marker${record.ownBrokerage ? " own" : ""}" style="--marker-color:${color}"></span>`
+        iconSize: [record.ownBrokerage ? 30 : 26, record.ownBrokerage ? 30 : 26],
+        iconAnchor: [record.ownBrokerage ? 15 : 13, record.ownBrokerage ? 15 : 13],
+        html: `<span class="market-marker${record.ownBrokerage ? " own" : ""}" style="--marker-color:${color}">${record.no}</span>`
       })
     }).addTo(state.map);
-    marker.bindPopup(`<strong>${escapeHtml(record.name || record.address)}</strong><br>${formatNumber(record.price)}万円<br>坪単価 ${formatNumber(record.unitPrice)}万円`);
+    marker.bindPopup(`<strong>No.${record.no} ${escapeHtml(record.name || record.address)}</strong><br>${formatNumber(record.price)}万円<br>坪単価 ${formatNumber(record.unitPrice)}万円`);
     marker.on("dragend", () => {
       const position = marker.getLatLng();
       const key = getRecordKey(record);
@@ -654,6 +659,34 @@ function renderMap() {
     state.map.fitBounds(points.map((record) => [record.lat, record.lng]), { padding: [24, 24] });
   }
   setTimeout(() => state.map.invalidateSize(), 120);
+}
+
+async function geocodeMissingRecords() {
+  const targets = state.current.filter((record) => {
+    const key = getRecordKey(record);
+    return !record.lat && !record.lng && record.address && !state.geocodingKeys.has(key);
+  });
+  for (const record of targets) {
+    const key = getRecordKey(record);
+    state.geocodingKeys.add(key);
+    try {
+      const endpoint = `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=jp&q=${encodeURIComponent(record.address)}`;
+      const response = await fetch(endpoint);
+      const results = response.ok ? await response.json() : [];
+      if (results[0]) {
+        state.positionAdjustments[key] = {
+          lat: Number(Number(results[0].lat).toFixed(6)),
+          lng: Number(Number(results[0].lon).toFixed(6))
+        };
+        processData();
+      }
+    } catch (error) {
+      // Keep the record without a map pin when address lookup is unavailable.
+    } finally {
+      state.geocodingKeys.delete(key);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+  }
 }
 
 function renderChart() {
