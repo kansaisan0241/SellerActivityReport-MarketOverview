@@ -99,6 +99,11 @@ function bindEvents() {
   $("#addCaseButton")?.addEventListener("click", () => {
     const incomingRecords = parsePastedData($("#pasteArea").value);
     if (!incomingRecords.length) return;
+    incomingRecords.forEach((record, index) => {
+      const normalized = normalizeRecord({ ...record, __recordId: createRecordId(record, state.addedRecords.length + index) });
+      const matchingRecord = state.current.find((current) => current.address.replace(/\s/g, "") === normalized.address.replace(/\s/g, "") && current.landArea > 0 && Math.abs(current.landArea - normalized.landArea) < 0.001);
+      if (matchingRecord && matchingRecord.price !== normalized.price) record.__priceChanged = true;
+    });
     state.addedRecords.push(...incomingRecords);
     $("#pasteArea").value = "";
     processData();
@@ -131,7 +136,10 @@ function bindEvents() {
   $("#importTopButton")?.addEventListener("click", () => $("#importFile")?.click());
   $("#importFile")?.addEventListener("change", async (event) => {
     const file = event.target.files?.[0];
-    if (file) $("#importArea").value = await file.text();
+    if (file) {
+      $("#importArea").value = await file.text();
+      restoreCurrentJson();
+    }
   });
   $("#importButton").addEventListener("click", importPreviousJson);
   $("#restoreButton")?.addEventListener("click", restoreCurrentJson);
@@ -202,11 +210,12 @@ function processData() {
   state.compared = compareRecords(state.current, state.previous)
     .map(applyTableEdits)
     .sort((a, b) => Number(normalizeStatus(b.status) === "対象物件") - Number(normalizeStatus(a.status) === "対象物件"));
-  state.compared.forEach((record, index) => {
-    record.no = index + 1;
+  let nextNo = 1;
+  state.compared.forEach((record) => {
+    record.no = normalizeStatus(record.status) === "対象物件" ? "" : nextNo++;
     const key = getRecordKey(record);
     if (!(key in state.priceChangeFlags)) {
-      state.priceChangeFlags[key] = record.comparisonStatus === "changed";
+      state.priceChangeFlags[key] = record.priceChanged || record.comparisonStatus === "changed";
     }
   });
   renderAdjustmentControls();
@@ -488,7 +497,8 @@ function normalizeRecord(raw) {
     buildingUnitPrice: numberValue(raw["建物坪単価"]) || defaults.buildingUnitPrice,
     renovationCost: numberValue(raw["リフォーム費用"]) || defaults.renovationCost,
     note: textValue(raw["備考"]),
-    ownBrokerage: isTruthy(raw["自社媒介フラグ"])
+    ownBrokerage: isTruthy(raw["自社媒介フラグ"]),
+    priceChanged: Boolean(raw.__priceChanged)
   };
   record.unitPrice = calculateUnitPrice(record);
   record.matchKeys = createMatchKeys(record);
@@ -666,7 +676,6 @@ function renderTable(selector, records) {
     ...(state.propertyType === "mansion" ? [["専有面積", "exclusiveArea", "num"]] : []),
     ["築年数", "age", "num"],
     ["坪単価", "unitPrice", "num"],
-    ["取引状況", "status"],
     ["登録日", "registeredDate"]
   ];
   table.querySelector("thead").innerHTML = `<tr>${columns.map(([label, , cls]) => `<th class="${cls || ""}">${label}</th>`).join("")}</tr>`;
@@ -684,7 +693,8 @@ function renderTable(selector, records) {
       if (isReportTable && ["name", "address", "station", "price", "landArea", "buildingArea", "exclusiveArea", "age", "registeredDate"].includes(key)) {
         const inputType = ["price", "landArea", "buildingArea", "exclusiveArea", "age"].includes(key) ? "number" : "text";
         const step = inputType === "number" ? " step=\"any\"" : "";
-        return `<td class="${cls || ""}" data-label="${label}"><input class="table-input" type="${inputType}"${step} data-edit-field="${key}" data-record-key="${recordKey}" value="${escapeHtml(value ?? "")}"></td>`;
+        const unit = key === "price" ? "万円" : ["landArea", "buildingArea", "exclusiveArea"].includes(key) ? "坪" : key === "age" ? "年" : "";
+        return `<td class="${cls || ""}" data-label="${label}"><span class="table-editor"><input class="table-input" type="${inputType}"${step} data-edit-field="${key}" data-record-key="${recordKey}" value="${escapeHtml(value ?? "")}">${unit ? `<span class="table-unit">${unit}</span>` : ""}</span></td>`;
       }
       return `<td class="${cls || ""}" data-label="${label}">${formatCell(key, value)}</td>`;
     }).join("")}</tr>`;
@@ -717,16 +727,17 @@ function renderMap() {
   state.markers = [];
   points.forEach((record) => {
     const color = record.ownBrokerage ? "#111111" : state.priceChangeFlags[getRecordKey(record)] ? "#d6a700" : record.comparisonStatus === "ended" ? "#9ca3af" : statusColor(record.status);
+    const markerLabel = record.no || "対象";
     const marker = L.marker([record.lat, record.lng], {
       draggable: true,
       icon: L.divIcon({
         className: "market-marker-shell",
         iconSize: [record.ownBrokerage ? 30 : 26, record.ownBrokerage ? 30 : 26],
         iconAnchor: [record.ownBrokerage ? 15 : 13, record.ownBrokerage ? 15 : 13],
-        html: `<span class="market-marker${record.ownBrokerage ? " own" : ""}" style="--marker-color:${color}">${record.no}</span>`
+        html: `<span class="market-marker${record.ownBrokerage ? " own" : ""}" style="--marker-color:${color}">${markerLabel}</span>`
       })
     }).addTo(state.map);
-    marker.bindPopup(`<strong>No.${record.no} ${escapeHtml(record.name || record.address)}</strong><br>${formatNumber(record.price)}万円<br>坪単価 ${formatNumber(record.unitPrice)}万円`);
+    marker.bindPopup(`<strong>${record.no ? `No.${record.no}` : "対象"} ${escapeHtml(record.name || record.address)}</strong><br>${formatNumber(record.price)}万円<br>坪単価 ${formatNumber(record.unitPrice)}万円`);
     marker.on("dragend", () => {
       const position = marker.getLatLng();
       const key = getRecordKey(record);

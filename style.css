@@ -675,6 +675,24 @@ td {
   font: inherit;
 }
 
+.table-editor {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.table-editor .table-input {
+  flex: 1;
+}
+
+.table-unit {
+  flex: 0 0 auto;
+  margin-left: 5px;
+  color: var(--subtext);
+  font-size: 11px;
+  font-weight: 700;
+}
+
 .table-input:focus,
 .table-select:focus {
   border-color: var(--primary);
@@ -885,8 +903,8 @@ tr.status-ended td {
 
   table tr {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 0 12px;
+    grid-template-columns: 1fr;
+    gap: 0;
     padding: 12px;
     border: 1px solid var(--border);
     border-radius: 12px;
@@ -895,7 +913,7 @@ tr.status-ended td {
 
   table td {
     display: grid;
-    grid-template-columns: minmax(62px, 0.8fr) minmax(0, 1.4fr);
+    grid-template-columns: minmax(88px, 0.8fr) minmax(0, 1.4fr);
     align-items: center;
     gap: 8px;
     min-width: 0;
