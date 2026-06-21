@@ -64,7 +64,8 @@ const state = {
   selectedAdjustmentKey: "",
   map: null,
   markers: [],
-  chart: null
+  chart: null,
+  printMapView: null
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -127,17 +128,22 @@ function bindEvents() {
     showView("reportView");
   });
   $("#printButton").addEventListener("click", () => {
+    state.printMapView = getMapView();
     processData();
     showView("reportView");
     setTimeout(() => {
-      renderMap();
+      renderMap(state.printMapView);
       renderChart();
       state.map?.invalidateSize();
-      setTimeout(() => window.print(), 700);
+      setTimeout(() => {
+        renderMap(state.printMapView);
+        state.map?.invalidateSize();
+        window.print();
+      }, 700);
     }, 120);
   });
   window.addEventListener("beforeprint", () => {
-    renderMap();
+    renderMap(state.printMapView || getMapView());
     renderChart();
     state.map?.invalidateSize();
   });
@@ -741,7 +747,13 @@ function formatCell(key, value) {
   return escapeHtml(value || "");
 }
 
-function renderMap() {
+function getMapView() {
+  if (!state.map) return null;
+  const center = state.map.getCenter();
+  return { center: [center.lat, center.lng], zoom: state.map.getZoom() };
+}
+
+function renderMap(savedView = null) {
   const mapElement = $("#map");
   if (!mapElement) return;
   if (!window.L) {
@@ -760,7 +772,7 @@ function renderMap() {
   state.markers.forEach((marker) => marker.remove());
   state.markers = [];
   points.forEach((record) => {
-    const color = record.ownBrokerage ? "#111111" : state.priceChangeFlags[getRecordKey(record)] ? "#d6a700" : record.comparisonStatus === "ended" ? "#9ca3af" : statusColor(record.status);
+    const color = "#111827";
     const markerLabel = record.no || "対象";
     const marker = L.marker([record.lat, record.lng], {
       draggable: true,
@@ -785,7 +797,9 @@ function renderMap() {
     });
     state.markers.push(marker);
   });
-  if (points.length) {
+  if (savedView?.center && Number.isFinite(savedView.zoom)) {
+    state.map.setView(savedView.center, savedView.zoom, { animate: false });
+  } else if (points.length) {
     state.map.fitBounds(points.map((record) => [record.lat, record.lng]), { padding: [24, 24] });
   }
   setTimeout(() => state.map.invalidateSize(), 120);
@@ -851,16 +865,48 @@ function renderChart() {
   }
   if (!canvas.isConnected) return;
   const [xKey, yKey] = $("#chartMode").value.split(":");
-  const records = state.compared.filter((record) => record.comparisonStatus !== "ended" || record.status.includes("成約") || record.status.includes("終了"));
-  const datasets = records.map((record) => ({
-    label: record.name || record.address || "物件",
-    data: [{ x: record[xKey], y: record[yKey] }],
-    pointRadius: record.ownBrokerage ? 9 : record.comparisonStatus === "changed" ? 8 : 6,
-    pointHoverRadius: record.ownBrokerage ? 11 : 8,
-    pointBackgroundColor: record.comparisonStatus === "changed" ? "#ffd968" : statusColor(record.status),
-    pointBorderColor: record.ownBrokerage ? "#111111" : "rgba(16, 35, 63, 0.35)",
-    pointBorderWidth: record.ownBrokerage ? 3 : 1.5
-  })).filter((dataset) => dataset.data[0].x > 0 && dataset.data[0].y > 0);
+  const records = state.compared.filter((record) => Number(record[xKey]) > 0 && Number(record[yKey]) > 0);
+  const groups = [
+    {
+      label: "対象物件",
+      matches: (record) => normalizeStatus(record.status) === "対象物件",
+      color: "#1f2e55",
+      borderColor: "#f59e0b",
+      radius: 11,
+      borderWidth: 3
+    },
+    {
+      label: "売出物件",
+      matches: (record) => normalizeStatus(record.status) === "売出物件",
+      color: "#ef4444",
+      borderColor: "#b91c1c",
+      radius: 7,
+      borderWidth: 1.5
+    },
+    {
+      label: "成約物件",
+      matches: (record) => normalizeStatus(record.status) === "成約物件",
+      color: "#7dd3fc",
+      borderColor: "#0369a1",
+      radius: 7,
+      borderWidth: 1.5
+    }
+  ];
+  const datasets = groups.map((group) => ({
+    label: group.label,
+    data: records.filter(group.matches).map((record) => ({
+      x: Number(record[xKey]),
+      y: Number(record[yKey]),
+      record
+    })),
+    pointRadius: group.radius,
+    pointHoverRadius: group.radius + 2,
+    pointBackgroundColor: group.color,
+    pointBorderColor: group.borderColor,
+    pointBorderWidth: group.borderWidth
+  })).filter((dataset) => dataset.data.length);
+  const xRange = chartRange(records.map((record) => Number(record[xKey])));
+  const yRange = chartRange(records.map((record) => Number(record[yKey])));
 
   if (state.chart) state.chart.destroy();
   state.chart = new Chart(canvas, {
@@ -881,16 +927,32 @@ function renderChart() {
         },
         tooltip: {
           callbacks: {
-            label: (context) => `${context.dataset.label}: ${formatNumber(context.parsed.x)} / ${formatNumber(context.parsed.y)}`
+            label: (context) => {
+              const record = context.raw.record;
+              return `${context.dataset.label}: ${record.address || record.name || "物件"} / ${formatNumber(context.parsed.y)}万円`;
+            }
           }
         }
       },
       scales: {
-        x: { title: { display: true, text: axisLabel(xKey) }, grid: { color: "#e8edf4" } },
-        y: { title: { display: true, text: axisLabel(yKey) }, grid: { color: "#e8edf4" } }
+        x: { min: xRange.min, max: xRange.max, title: { display: true, text: axisLabel(xKey) }, grid: { color: "#e8edf4" } },
+        y: { min: yRange.min, max: yRange.max, title: { display: true, text: axisLabel(yKey) }, grid: { color: "#e8edf4" } }
       }
     }
   });
+}
+
+function chartRange(values) {
+  const valid = values.filter((value) => Number.isFinite(value));
+  if (!valid.length) return { min: 0, max: 1 };
+  const minimum = Math.min(...valid);
+  const maximum = Math.max(...valid);
+  const spread = Math.max(maximum - minimum, Math.abs(maximum) * 0.12, 1);
+  const padding = spread * 0.6;
+  return {
+    min: Math.max(0, minimum - padding),
+    max: maximum + padding
+  };
 }
 
 function statusColor(status) {
