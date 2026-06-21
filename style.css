@@ -348,12 +348,12 @@ textarea {
 .report-title {
   position: relative;
   display: flex;
-  justify-content: center;
+  justify-content: flex-start;
   align-items: flex-start;
   gap: 24px;
   padding: 14px 0 12px;
   border-bottom: 1px solid var(--border);
-  text-align: center;
+  text-align: left;
 }
 
 .report-title h2 {
@@ -536,10 +536,12 @@ textarea {
   border: 2px solid #fff;
   border-radius: 999px;
   box-shadow: 0 1px 4px rgba(15, 23, 42, 0.25);
-  color: #fff;
+  color: #fff !important;
   font-family: "Noto Sans JP", system-ui, sans-serif;
-  font-size: 11px;
-  font-weight: 700;
+  font-size: 11px !important;
+  font-weight: 700 !important;
+  line-height: 1 !important;
+  text-align: center;
 }
 
 .market-marker.own {
@@ -603,6 +605,17 @@ textarea {
 .panel {
   margin-top: 12px;
   padding: 16px;
+}
+
+.table-card .section-heading {
+  position: relative;
+  justify-content: center;
+  text-align: center;
+}
+
+.table-card .count-pill {
+  position: absolute;
+  right: 0;
 }
 
 .section-heading {
@@ -996,8 +1009,8 @@ tr.status-ended td {
   }
 
   .report-title {
-    justify-content: center;
-    text-align: center;
+    justify-content: flex-start;
+    text-align: left;
   }
 
   .report-title dl {

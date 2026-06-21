@@ -58,6 +58,7 @@ const state = {
   adjustments: {},
   positionAdjustments: {},
   geocodingKeys: new Set(),
+  geocodedKeys: new Set(),
   tableEdits: {},
   priceChangeFlags: {},
   selectedAdjustmentKey: "",
@@ -160,7 +161,7 @@ function bindEvents() {
   });
   $("#chartMode").addEventListener("change", () => renderChart());
   $("#showPriceChange")?.addEventListener("change", renderReport);
-  $("#geocodeButton")?.addEventListener("click", geocodeMissingRecords);
+  $("#geocodeButton")?.addEventListener("click", refreshGeocoding);
   $("#reportTable")?.addEventListener("change", handleTableChange);
   $("#adjustmentProperty")?.addEventListener("change", () => {
     state.selectedAdjustmentKey = $("#adjustmentProperty").value;
@@ -635,11 +636,12 @@ function renderMetrics() {
   const contractCount = state.compared.filter((record) => normalizeStatus(record.status) === "成約物件").length;
   const shouldShowPriceChange = $("#showPriceChange")?.checked;
   const changedCount = shouldShowPriceChange ? state.compared.filter((record) => state.priceChangeFlags[getRecordKey(record)]).length : 0;
-  $("#metrics").innerHTML = [
+  const metrics = [
     metricHtml("売出物件数", `${saleCount}件`),
-    metricHtml("成約物件数", `${contractCount}件`),
-    metricHtml("価格変更数", `${changedCount}件`)
-  ].join("");
+    metricHtml("成約物件数", `${contractCount}件`)
+  ];
+  if (shouldShowPriceChange) metrics.push(metricHtml("価格変更数", `${changedCount}件`));
+  $("#metrics").innerHTML = metrics.join("");
 }
 
 function metricHtml(label, value, details = []) {
@@ -724,7 +726,8 @@ function renderTable(selector, records) {
         const inputType = ["price", "landArea", "buildingArea", "exclusiveArea", "age"].includes(key) ? "number" : "text";
         const step = inputType === "number" ? " step=\"any\"" : "";
         const unit = key === "price" ? "万円" : ["landArea", "buildingArea", "exclusiveArea"].includes(key) ? "坪" : key === "age" ? "年" : "";
-        return `<td class="${cls || ""}" data-label="${label}"><span class="table-editor"><input class="table-input" type="${inputType}"${step} data-edit-field="${key}" data-record-key="${recordKey}" value="${escapeHtml(value ?? "")}">${unit ? `<span class="table-unit">${unit}</span>` : ""}</span></td>`;
+        const displayValue = ["landArea", "buildingArea", "exclusiveArea"].includes(key) ? formatArea(value) : value ?? "";
+        return `<td class="${cls || ""}" data-label="${label}"><span class="table-editor"><input class="table-input" type="${inputType}"${step} data-edit-field="${key}" data-record-key="${recordKey}" value="${escapeHtml(displayValue)}">${unit ? `<span class="table-unit">${unit}</span>` : ""}</span></td>`;
       }
       return `<td class="${cls || ""}" data-label="${label}">${formatCell(key, value)}</td>`;
     }).join("")}</tr>`;
@@ -733,7 +736,7 @@ function renderTable(selector, records) {
 
 function formatCell(key, value) {
   if (["price", "unitPrice"].includes(key)) return `${formatNumber(value)}万円`;
-  if (["landArea", "buildingArea", "exclusiveArea"].includes(key)) return value ? `${formatNumber(value)}坪` : "";
+  if (["landArea", "buildingArea", "exclusiveArea"].includes(key)) return value ? `${formatArea(value)}坪` : "";
   if (key === "age") return value ? `${formatNumber(value)}年` : "";
   return escapeHtml(value || "");
 }
@@ -797,10 +800,16 @@ async function geocodeMissingRecords() {
     const key = getRecordKey(record);
     state.geocodingKeys.add(key);
     try {
-      const endpoint = `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=jp&accept-language=ja&q=${encodeURIComponent(`${record.address} 日本`)}`;
-      const response = await fetch(endpoint);
-      const results = response.ok ? await response.json() : [];
-      let location = results[0] ? { lat: results[0].lat, lng: results[0].lon } : null;
+      const gsiResponse = await fetch(`https://msearch.gsi.go.jp/address-search/AddressSearch?q=${encodeURIComponent(record.address)}`);
+      const gsiResults = gsiResponse.ok ? await gsiResponse.json() : [];
+      const gsiCoordinates = gsiResults[0]?.geometry?.coordinates;
+      let location = gsiCoordinates ? { lat: gsiCoordinates[1], lng: gsiCoordinates[0] } : null;
+      if (!location) {
+        const endpoint = `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=jp&accept-language=ja&q=${encodeURIComponent(`${record.address} 日本`)}`;
+        const response = await fetch(endpoint);
+        const results = response.ok ? await response.json() : [];
+        location = results[0] ? { lat: results[0].lat, lng: results[0].lon } : null;
+      }
       if (!location) {
         const fallback = await fetch(`https://photon.komoot.io/api/?limit=1&lang=ja&q=${encodeURIComponent(`${record.address} 日本`)}`);
         const fallbackResults = fallback.ok ? await fallback.json() : { features: [] };
@@ -812,6 +821,7 @@ async function geocodeMissingRecords() {
           lat: Number(Number(location.lat).toFixed(6)),
           lng: Number(Number(location.lng).toFixed(6))
         };
+        state.geocodedKeys.add(key);
         processData();
       }
     } catch (error) {
@@ -821,6 +831,12 @@ async function geocodeMissingRecords() {
     }
     await new Promise((resolve) => setTimeout(resolve, 1100));
   }
+}
+
+function refreshGeocoding() {
+  state.geocodedKeys.forEach((key) => delete state.positionAdjustments[key]);
+  state.geocodedKeys.clear();
+  processData();
 }
 
 function renderChart() {
@@ -1041,6 +1057,13 @@ function formatNumber(value) {
   const number = Number(value);
   if (!Number.isFinite(number) || number === 0) return "0";
   return number.toLocaleString("ja-JP", { maximumFractionDigits: 2 });
+}
+
+function formatArea(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number) || number === 0) return "0";
+  const truncated = Math.trunc(number * 100) / 100;
+  return truncated.toLocaleString("ja-JP", { maximumFractionDigits: 2 });
 }
 
 function escapeHtml(value) {
