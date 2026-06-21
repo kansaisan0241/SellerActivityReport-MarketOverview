@@ -128,7 +128,17 @@ function bindEvents() {
   $("#printButton").addEventListener("click", () => {
     processData();
     showView("reportView");
-    setTimeout(() => window.print(), 150);
+    setTimeout(() => {
+      renderMap();
+      renderChart();
+      state.map?.invalidateSize();
+      setTimeout(() => window.print(), 700);
+    }, 120);
+  });
+  window.addEventListener("beforeprint", () => {
+    renderMap();
+    renderChart();
+    state.map?.invalidateSize();
   });
   $("#exportButton").addEventListener("click", downloadJson);
   $("#downloadButton").addEventListener("click", downloadJson);
@@ -740,6 +750,7 @@ function renderMap() {
     state.map = L.map("map", { scrollWheelZoom: false }).setView([35.681236, 139.767125], 12);
     L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
       maxZoom: 19,
+      detectRetina: true,
       attribution: "&copy; OpenStreetMap contributors"
     }).addTo(state.map);
   }
@@ -786,13 +797,20 @@ async function geocodeMissingRecords() {
     const key = getRecordKey(record);
     state.geocodingKeys.add(key);
     try {
-      const endpoint = `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=jp&q=${encodeURIComponent(record.address)}`;
+      const endpoint = `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=jp&accept-language=ja&q=${encodeURIComponent(`${record.address} 日本`)}`;
       const response = await fetch(endpoint);
       const results = response.ok ? await response.json() : [];
-      if (results[0]) {
+      let location = results[0] ? { lat: results[0].lat, lng: results[0].lon } : null;
+      if (!location) {
+        const fallback = await fetch(`https://photon.komoot.io/api/?limit=1&lang=ja&q=${encodeURIComponent(`${record.address} 日本`)}`);
+        const fallbackResults = fallback.ok ? await fallback.json() : { features: [] };
+        const coordinates = fallbackResults.features?.[0]?.geometry?.coordinates;
+        if (coordinates) location = { lat: coordinates[1], lng: coordinates[0] };
+      }
+      if (location) {
         state.positionAdjustments[key] = {
-          lat: Number(Number(results[0].lat).toFixed(6)),
-          lng: Number(Number(results[0].lon).toFixed(6))
+          lat: Number(Number(location.lat).toFixed(6)),
+          lng: Number(Number(location.lng).toFixed(6))
         };
         processData();
       }
