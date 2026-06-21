@@ -394,6 +394,7 @@ function parseLabeledTextBlock(block) {
   const reinsAddress = [prefecture, address1, address2, address3].filter(Boolean).join("");
   const reinsPrice = getAfterLabel(["価格"], /^[0-9,\.]+万円$/);
   const reinsContractPrice = getAfterLabel(["成約価格"], /^[0-9,\.]+万円$/);
+  const reinsPreviousPrice = getAfterLabel(["変更前価格"], /^[0-9,\.]+万円$/);
   const reinsLandArea = getAfterLabel(["土地面積", "（私道を含まず）"], /^[0-9,\.]+(?:㎡|m2|平米|坪)$/);
   const reinsBuildingArea = getAfterLabel(["建物面積", "延床面積"], /^[0-9,\.]+(?:㎡|m2|平米|坪)$/);
   const reinsExclusiveArea = getAfterLabel(["専有面積"], /^[0-9,\.]+(?:㎡|m2|平米|坪)$/);
@@ -416,7 +417,7 @@ function parseLabeledTextBlock(block) {
   record["物件URL"] = get([/(https?:\/\/[^\s]+)/]);
   record["取引状況"] = reinsStatus || get([/(?:取引状況|状態|販売状況)\s*[:：]?\s*([^\n]+)/]) || "販売中";
   record["沿線駅"] = [reinsLine, reinsStation].filter(Boolean).join(" ");
-  record["前回価格"] = get([/(?:前回価格)\s*[:：]?\s*([0-9,\.]+)\s*(?:万円|円)?/]);
+  record["前回価格"] = reinsPreviousPrice || get([/(?:前回価格)\s*[:：]?\s*([0-9,\.]+)\s*(?:万円|円)?/]);
   record["今回価格"] = get([/(?:今回価格)\s*[:：]?\s*([0-9,\.]+)\s*(?:万円|円)?/]);
   record["建物減価償却年数"] = get([/(?:建物減価償却年数|減価償却年数)\s*[:：]?\s*([0-9,\.]+)/]);
   record["建物坪単価"] = get([/(?:建物坪単価)\s*[:：]?\s*([0-9,\.]+)/]);
@@ -498,7 +499,7 @@ function normalizeRecord(raw) {
     renovationCost: numberValue(raw["リフォーム費用"]) || defaults.renovationCost,
     note: textValue(raw["備考"]),
     ownBrokerage: isTruthy(raw["自社媒介フラグ"]),
-    priceChanged: Boolean(raw.__priceChanged)
+    priceChanged: Boolean(raw.__priceChanged) || (numberValue(raw["前回価格"]) > 0 && numberValue(raw["前回価格"]) !== (numberValue(raw["今回価格"]) || numberValue(raw["価格"])))
   };
   record.unitPrice = calculateUnitPrice(record);
   record.matchKeys = createMatchKeys(record);
