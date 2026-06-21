@@ -18,7 +18,8 @@ const HEADERS = [
   "リフォーム費用",
   "備考",
   "自社媒介フラグ",
-  "沿線駅"
+  "沿線駅",
+  "物件種目"
 ];
 
 const TYPE_LABELS = {
@@ -330,7 +331,7 @@ function parsePastedData(text) {
   const rows = trimmed.split(/\r?\n/).filter(Boolean).map(splitRow);
   if (!rows.length) return [];
   const header = rows[0].map((cell) => cell.trim());
-  const hasHeader = header.some((cell) => HEADERS.includes(cell));
+  const hasHeader = header.length > 1 && header.some((cell) => HEADERS.includes(cell));
   if (!hasHeader && rows.every((row) => row.length <= 2)) {
     return parseLabeledTextData(trimmed);
   }
@@ -398,6 +399,10 @@ function parseLabeledTextBlock(block) {
   const reinsStatus = reinsContractPrice || reinsContractDate ? "成約" : "販売中";
   const reinsLine = getAfterLabel(["沿線名"], /.+/);
   const reinsStation = getAfterLabel(["駅名"], /.+/);
+  const reinsWalk = getAfterLabel(["駅より徒歩"], /^\d+分$/);
+  const reinsBus = getAfterLabel(["駅よりバス"], /^\d+分$/);
+  const reinsBusStopWalk = getAfterLabel(["バス停より徒歩"], /^\d+分$/);
+  const stationText = formatStation(reinsLine, reinsStation, reinsWalk, reinsBus, reinsBusStopWalk);
 
   record["物件名"] = get([/(?:物件名|名称|建物名|マンション名)\s*[:：]?\s*([^\n]+)/]) || (reinsAddress ? `${propertyType || "REINS"} ${reinsAddress}` : (propertyNumber ? `${propertyType || "REINS"} ${propertyNumber}` : propertyType));
   record["所在地"] = reinsAddress || get([/(?:所在地|住所|物件所在地)\s*[:：]?\s*([^\n]+)/]);
@@ -409,7 +414,8 @@ function parseLabeledTextBlock(block) {
   record["登録日"] = reinsRegisteredDate || get([/(?:登録日|掲載日|情報登録日|公開日)\s*[:：]?\s*([0-9\/\-.年月日]+)/]);
   record["物件URL"] = get([/(https?:\/\/[^\s]+)/]);
   record["取引状況"] = reinsStatus || get([/(?:取引状況|状態|販売状況)\s*[:：]?\s*([^\n]+)/]) || "販売中";
-  record["沿線駅"] = [reinsLine, reinsStation].filter(Boolean).join(" ");
+  record["沿線駅"] = stationText;
+  record["物件種目"] = propertyType;
   record["前回価格"] = reinsPreviousPrice || get([/(?:前回価格)\s*[:：]?\s*([0-9,\.]+)\s*(?:万円|円)?/]);
   record["今回価格"] = get([/(?:今回価格)\s*[:：]?\s*([0-9,\.]+)\s*(?:万円|円)?/]);
   record["建物減価償却年数"] = get([/(?:建物減価償却年数|減価償却年数)\s*[:：]?\s*([0-9,\.]+)/]);
@@ -436,8 +442,21 @@ function ageValue(value) {
 }
 
 function ageFromBuiltDate(value) {
-  const match = String(value ?? "").match(/(\d{4})年/);
-  return match ? String(Math.max(0, new Date().getFullYear() - Number(match[1]))) : "";
+  const match = String(value ?? "").match(/(\d{4})年\s*(?:（[^）]+）\s*)?(\d{1,2})月?/);
+  if (!match) return "";
+  const today = new Date();
+  const builtYear = Number(match[1]);
+  const builtMonth = Number(match[2]);
+  const age = today.getFullYear() - builtYear - (today.getMonth() + 1 < builtMonth ? 1 : 0);
+  return String(Math.max(0, age));
+}
+
+function formatStation(line, station, walk, bus, busStopWalk) {
+  if (!line || !station) return [line, station].filter(Boolean).join(" ");
+  const base = `${line}「${station}」駅`;
+  if (walk) return `${base} 徒歩${walk}`;
+  if (bus || busStopWalk) return `${base} バス${bus || "0分"}・停歩${busStopWalk || "0分"}`;
+  return base;
 }
 
 function splitRow(row) {
@@ -470,18 +489,22 @@ function parseCsvLine(line) {
 
 function normalizeRecord(raw) {
   const defaults = getDefaults();
+  const propertyKind = textValue(raw["物件種目"]);
+  const isLandOnly = /売地|借地権|底地権/.test(propertyKind);
   const record = {
     recordId: raw.__recordId || "",
     name: textValue(raw["物件名"]),
     address: textValue(raw["所在地"]),
     station: textValue(raw["沿線駅"]),
+    propertyKind,
+    isLandOnly,
     lat: numberValue(raw["緯度"]),
     lng: numberValue(raw["経度"]),
     price: numberValue(raw["今回価格"]) || numberValue(raw["価格"]),
     landArea: numberValue(raw["土地面積"]),
-    buildingArea: numberValue(raw["建物面積"]),
+    buildingArea: isLandOnly ? 0 : numberValue(raw["建物面積"]),
     exclusiveArea: numberValue(raw["専有面積"]),
-    age: numberValue(raw["築年数"]),
+    age: isLandOnly ? 0 : numberValue(raw["築年数"]),
     registeredDate: textValue(raw["登録日"]),
     url: textValue(raw["物件URL"]),
     status: normalizeStatus(raw["取引状況"]),
@@ -684,6 +707,9 @@ function renderTable(selector, records) {
         return `<td data-label="${label}">${escapeHtml(status)}</td>`;
       }
       const value = record[key];
+      if (record.isLandOnly && ["buildingArea", "age"].includes(key)) {
+        return `<td class="${cls || ""}" data-label="${label}">-</td>`;
+      }
       if (isReportTable && ["name", "address", "station", "price", "landArea", "buildingArea", "exclusiveArea", "age", "registeredDate"].includes(key)) {
         const inputType = ["price", "landArea", "buildingArea", "exclusiveArea", "age"].includes(key) ? "number" : "text";
         const step = inputType === "number" ? " step=\"any\"" : "";
@@ -951,7 +977,8 @@ function recordsToPaste(records) {
     record.renovationCost,
     record.note,
     record.ownBrokerage ? "1" : "",
-    record.station
+    record.station,
+    record.propertyKind
   ]);
   return [HEADERS, ...rows].map((row) => row.map((value) => String(value ?? "").replace(/\t|\r?\n/g, " ")).join("\t")).join("\n");
 }
@@ -962,6 +989,7 @@ function recordFromJson(record) {
     name: textValue(record.name),
     address: textValue(record.address),
     station: textValue(record.station),
+    propertyKind: textValue(record.propertyKind),
     lat: numberValue(record.lat),
     lng: numberValue(record.lng),
     price: numberValue(record.price || record.currentPrice),
