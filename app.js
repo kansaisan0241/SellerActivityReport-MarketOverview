@@ -97,14 +97,12 @@ function bindEvents() {
     processData();
   });
   $("#addCaseButton")?.addEventListener("click", () => {
-    const incomingRecords = parsePastedData($("#pasteArea").value);
-    if (!incomingRecords.length) return;
-    incomingRecords.forEach((record, index) => {
-      const normalized = normalizeRecord({ ...record, __recordId: createRecordId(record, state.addedRecords.length + index) });
-      const matchingRecord = state.current.find((current) => current.address.replace(/\s/g, "") === normalized.address.replace(/\s/g, "") && current.landArea > 0 && Math.abs(current.landArea - normalized.landArea) < 0.001);
-      if (matchingRecord && matchingRecord.price !== normalized.price) record.__priceChanged = true;
-    });
-    state.addedRecords.push(...incomingRecords);
+    const incomingRecord = parsePastedData($("#pasteArea").value)[0];
+    if (!incomingRecord) return;
+    const normalized = normalizeRecord({ ...incomingRecord, __recordId: createRecordId(incomingRecord, state.addedRecords.length) });
+    const matchingRecord = state.current.find((current) => current.address.replace(/\s/g, "") === normalized.address.replace(/\s/g, "") && current.landArea > 0 && Math.abs(current.landArea - normalized.landArea) < 0.001);
+    if (matchingRecord && matchingRecord.price !== normalized.price) incomingRecord.__priceChanged = true;
+    state.addedRecords.push(incomingRecord);
     $("#pasteArea").value = "";
     processData();
     showView("reportView");
@@ -348,12 +346,7 @@ function parsePastedData(text) {
 }
 
 function parseLabeledTextData(text) {
-  const blocks = text.split(/\n\s*\n+/).map((block) => block.trim()).filter(Boolean);
-  const candidates = blocks.length > 1 ? blocks : [text.trim()];
-  const records = candidates.map(parseLabeledTextBlock).filter((record) => {
-    return record["物件名"] || record["所在地"] || record["価格"] || record["今回価格"];
-  });
-  return records.length ? records : [parseLabeledTextBlock(text)];
+  return [parseLabeledTextBlock(text)];
 }
 
 function parseLabeledTextBlock(block) {
